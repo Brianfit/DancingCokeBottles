@@ -1,0 +1,321 @@
+// Sound activated LEDs with the Arduino and NeoPixels 
+
+#include <Adafruit_NeoPixel.h>
+
+#define MIC_PIN    A0  // Microphone is attached to  pin 2 A1 on the Arduino
+#define LED_PIN    6  // NeoPixel LED strand attached to pin 0 on Arduino
+#define N_PIXELS   36  // number of pixels in LED strand
+#define N          100  // Number of samples to take each time readSamples is called
+#define fadeDelay  5  // delay time for each fade amount
+#define noiseLevel 30  // slope level of average mic noise without sound 
+
+Adafruit_NeoPixel  strip = Adafruit_NeoPixel(N_PIXELS, LED_PIN, NEO_GRB + NEO_KHZ800);
+
+int samples[N];        // storage for a sample collection set
+int periodFactor = 0;  // keep track of number of ms for period calculation
+int t1 = -1;           // times of slope > 100 detected.
+int T;                 // period between times scaled to milliseconds
+int slope;             // the slope of two collected data sample points
+byte periodChanged = 0;
+const int SwitchPinMusic = 4;
+const int SwitchPinSwirl = 8;
+int MusicbuttonState = 0; 
+int SwirlbuttonState = 0; 
+
+
+// Arduino setup Method
+void setup() 
+{
+    strip.begin();
+    ledsOff();
+    delay(500);
+    
+    displayColor(Wheel(100)); 
+    strip.show();
+    delay(500);
+    
+    oddWheel(Wheel(100));
+    strip.show();
+    delay(500);
+     pinMode(SwitchPinMusic, INPUT);
+     pinMode(SwitchPinSwirl, INPUT);
+     attachInterrupt(4, Switched, FALLING);
+
+}
+
+// Arduino loop Method
+void loop() 
+{  
+  
+ SwirlbuttonState = digitalRead(SwitchPinSwirl);
+ MusicbuttonState = digitalRead(SwitchPinMusic);
+ while (MusicbuttonState == HIGH) {
+    readSamples();
+    MusicbuttonState = digitalRead(SwitchPinMusic);
+}
+ SwirlbuttonState = digitalRead(SwitchPinSwirl);
+ MusicbuttonState = digitalRead(SwitchPinMusic);
+ if (SwirlbuttonState == HIGH) {
+ Dance();
+ SwirlbuttonState = digitalRead(SwitchPinSwirl);
+}
+}
+
+void Dance() {  
+  while (MusicbuttonState == LOW) {
+  colorWipe(strip.Color(255, 0, 0), 50); // Red
+  MusicbuttonState = digitalRead(SwitchPinMusic);
+  colorWipe(strip.Color(0, 255, 0), 50); // Green
+  MusicbuttonState = digitalRead(SwitchPinMusic);
+  colorWipe(strip.Color(0, 0, 255), 50); // Blue
+  SwirlbuttonState = digitalRead(SwitchPinSwirl);
+  //colorWipe(strip.Color(0, 0, 0, 255), 50); // White RGBW
+  // Send a theater pixel chase in...
+  SwirlbuttonState = digitalRead(SwitchPinSwirl);
+  theaterChase(strip.Color(127, 127, 127), 50); // White
+  SwirlbuttonState = digitalRead(SwitchPinSwirl);
+  theaterChase(strip.Color(127, 0, 0), 50); // Red
+  SwirlbuttonState = digitalRead(SwitchPinSwirl);
+  theaterChase(strip.Color(0, 0, 127), 50); // Blue
+  SwirlbuttonState = digitalRead(SwitchPinSwirl);
+  rainbow(20);
+  SwirlbuttonState = digitalRead(SwitchPinSwirl);
+  rainbowCycle(20);
+  SwirlbuttonState = digitalRead(SwitchPinSwirl);
+  theaterChaseRainbow(50);
+  SwirlbuttonState = digitalRead(SwitchPinSwirl);
+}
+}
+// Read  and Process Sample Data from Mic
+void readSamples()
+{  
+  for(int i=0; i<N; i++)
+  {
+      samples[i] = analogRead(MIC_PIN);
+  
+      if(i>0)
+      {
+        slope = samples[i] - samples[i-1];
+      }
+      else
+      {
+        slope = samples[i] - samples[N-1];
+      }
+    
+      // Check if Slope greater than noiseLevel  - sound that is not at noise level detected
+      if(abs(slope) > noiseLevel)
+      {
+        if(slope < 0)
+        {
+             calculatePeriod(i);
+             
+             if(periodChanged == 1)
+             {
+               displayColor(getColor(T));
+             }
+        }
+      }
+      else
+      {
+             ledsOff();
+//             theaterChaseRainbow(50);
+             
+      }
+     
+    periodFactor += 1;
+    delay(1);
+  }
+}
+
+
+void calculatePeriod(int i)
+{
+        if(t1 == -1)
+        {
+            // t1 has not been set 
+            t1 = i; 
+        }
+        else
+        { 
+             // t1 was set so calc period
+             int period = periodFactor*(i - t1);
+             periodChanged = T==period ? 0 : 1;
+             T = period;
+             //Serial.println(T);
+             
+             // reset t1 to new i value
+             t1 = i; 
+             periodFactor = 0;
+        }
+}
+
+uint32_t getColor(int period)
+{
+  if(period == -1) 
+     return Wheel(0);
+  else if(period > 400)
+     return Wheel(5);
+  else 
+    return Wheel(map(-1*period, -400, -1, 50, 255));
+}
+
+
+void fadeOut()
+{
+  for(int i=0; i<5; i++)
+  { 
+    strip.setBrightness(110 - i*20);
+    strip.show(); // Update strip
+    delay(fadeDelay);
+    periodFactor +=fadeDelay;
+  }
+}
+
+void fadeIn()
+{
+  
+  strip.setBrightness(100);
+  strip.show(); // Update strip
+  
+    // fade color in 
+  for(int i=0; i<5; i++)
+  {
+    //strip.setBrightness(20*i + 30);
+    //strip.show(); // Update strip
+    delay(fadeDelay);
+    periodFactor+=fadeDelay;
+  }
+}
+
+void ledsOff()
+{ 
+  fadeOut();
+  
+  for(int i=0; i<N_PIXELS; i++) 
+  {
+         strip.setPixelColor(i, 0, 0, 0);
+  }
+}
+
+void displayColor(uint32_t color)
+{
+  
+  for(int i=0; i<N_PIXELS; i++) 
+  {
+         strip.setPixelColor(i, color);
+  }
+  
+  
+  
+  fadeIn();
+}
+
+  void oddWheel(uint32_t color)
+{
+  for (int j=0; j < 256; j++) {     // cycle all 256 colors in the wheel
+    for (int q=0; q < 3; q++) {
+      for (uint16_t i=24; i < 36; i=i+3) {
+        strip.setPixelColor(i+q, Wheel( (i+j) % 255));    //turn every third pixel on
+      }
+      strip.show();
+
+      delay(1 );
+
+      for (uint16_t i=24; i < 36; i=i+3) {
+        strip.setPixelColor(i+q, 0);        //turn every third pixel off
+      }
+    }
+  }
+  fadeIn();
+}
+
+// Fill the dots one after the other with a color
+void colorWipe(uint32_t c, uint8_t wait) {
+  for(uint16_t i=0; i<strip.numPixels(); i++) {
+    strip.setPixelColor(i, c);
+    strip.show();
+    delay(wait);
+  }
+}
+
+void rainbow(uint8_t wait) {
+  uint16_t i, j;
+
+  for(j=0; j<256; j++) {
+    for(i=0; i<strip.numPixels(); i++) {
+      strip.setPixelColor(i, Wheel((i+j) & 255));
+    }
+    strip.show();
+    delay(wait);
+  }
+}
+
+// Slightly different, this makes the rainbow equally distributed throughout
+void rainbowCycle(uint8_t wait) {
+  uint16_t i, j;
+
+  for(j=0; j<256*5; j++) { // 5 cycles of all colors on wheel
+    for(i=0; i< strip.numPixels(); i++) {
+      strip.setPixelColor(i, Wheel(((i * 256 / strip.numPixels()) + j) & 255));
+    }
+    strip.show();
+    delay(wait);
+  }
+}
+
+//Theatre-style crawling lights.
+void theaterChase(uint32_t c, uint8_t wait) {
+  for (int j=0; j<10; j++) {  //do 10 cycles of chasing
+    for (int q=0; q < 3; q++) {
+      for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
+        strip.setPixelColor(i+q, c);    //turn every third pixel on
+      }
+      strip.show();
+
+      delay(wait);
+
+      for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
+        strip.setPixelColor(i+q, 0);        //turn every third pixel off
+      }
+    }
+  }
+}
+
+//Theatre-style crawling lights with rainbow effect
+void theaterChaseRainbow(uint8_t wait) {
+  for (int j=0; j < 256; j++) {     // cycle all 256 colors in the wheel
+    for (int q=0; q < 3; q++) {
+      for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
+        strip.setPixelColor(i+q, Wheel( (i+j) % 255));    //turn every third pixel on
+      }
+      strip.show();
+
+      delay(wait);
+
+      for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
+        strip.setPixelColor(i+q, 0);        //turn every third pixel off
+      }
+    }
+  }
+}
+
+// Input a value 0 to 255 to get a color value.
+// The colours are a transition r - g - b - back to r.
+uint32_t Wheel(byte WheelPos) {
+  WheelPos = 255 - WheelPos;
+  if(WheelPos < 85) {
+    return strip.Color(255 - WheelPos * 3, 0, WheelPos * 3);
+  }
+  if(WheelPos < 170) {
+    WheelPos -= 85;
+    return strip.Color(0, WheelPos * 3, 255 - WheelPos * 3);
+  }
+  WheelPos -= 170;
+  return strip.Color(WheelPos * 3, 255 - WheelPos * 3, 0);
+}
+
+void Switched(){
+  strip.show();
+ readSamples(); 
+}
+
